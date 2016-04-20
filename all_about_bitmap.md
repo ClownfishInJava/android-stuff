@@ -217,6 +217,116 @@ RGB565，如果不需要alpha通道，特别是资源本身为jpg格式的情况
 看来这个法子还真行啊，占用内存一下小很多。不过由于官方并未做出支持，因此这个方法有诸多限制，比如不能在 xml 中直接配置，，生成的 Bitmap 不能用于构建 Canvas 等等
 
 ###Bitmap的OOM
+android的OOM是一个经常碰到的问题~~一种简便的解决方式就是分配更少的内存空间来存储，即在载入图片的时候以牺牲图片质量为代价，将图片进行缩放。但是，这种方法得不偿失，牺牲了图片质量。
+在BitmapFactory中有一个内部类BitmapFactory.Options，其中值得我们注意的是inSampleSize和inJustDecodeBounds两个属性
+
+* inSampleSize是以2的指数的倒数被进行放缩
+
+  If set to a value > 1, requests the decoder to subsample the original image, returning a smaller image to save memory. (1 -> decodes full size; 2 -> decodes 1/4th size; 4 -> decode 1/16th size). Because you rarely need to show and have full size bitmap images on your phone. For manipulations smaller sizes are usually enough.
+* inJustDecodeBounds为Boolean型
+
+  设置inJustDecodeBounds为true后，decodeFile并不分配空间，但可计算出原始图片的长度和宽度，即options.outWidth和options.outHeight。
+  
+要对图片进行缩放，最大的问题就是怎么运行时改变inSampleSize的值，通过上面的inJustDecodeBounds可以知道图片原始的大小，那么这样就可以通过算法来得到一个恰当的inSampleSize。其动态算法可参考：
+
+	/**
+ 	* compute Sample Size
+ 	* 
+ 	* @param options
+ 	* @param minSideLength
+ 	* @param maxNumOfPixels
+ 	* @return
+ 	*/
+	public static int computeSampleSize(BitmapFactory.Options options,
+		int minSideLength, int maxNumOfPixels) {
+	int initialSize = computeInitialSampleSize(options, minSideLength,
+			maxNumOfPixels);
+
+	int roundedSize;
+	if (initialSize <= 8) {
+		roundedSize = 1;
+		while (roundedSize < initialSize) {
+			roundedSize <<= 1;
+		}
+	} else {
+		roundedSize = (initialSize + 7) / 8 * 8;
+	}
+
+	return roundedSize;
+	}
+
+	/**
+ 	* compute Initial Sample Size
+ 	* 
+ 	* @param options
+ 	* @param minSideLength
+ 	* @param maxNumOfPixels
+ 	* @return
+	*/
+	private static int computeInitialSampleSize(BitmapFactory.Options options,
+		int minSideLength, int maxNumOfPixels) {
+	double w = options.outWidth;
+	double h = options.outHeight;
+
+	// 上下限范围
+	int lowerBound = (maxNumOfPixels == -1) ? 1 : (int) Math.ceil(Math
+			.sqrt(w * h / maxNumOfPixels));
+	int upperBound = (minSideLength == -1) ? 128 : (int) Math.min(
+			Math.floor(w / minSideLength), Math.floor(h / minSideLength));
+
+	if (upperBound < lowerBound) {
+		// return the larger one when there is no overlapping zone.
+		return lowerBound;
+	}
+
+	if ((maxNumOfPixels == -1) && (minSideLength == -1)) {
+		return 1;
+	} else if (minSideLength == -1) {
+		return lowerBound;
+	} else {
+		return upperBound;
+	}
+	}
+	
+有了上面的算法，我们可以轻易的get到Bitmap
+
+	/**
+ 	* get Bitmap
+ 	* 
+ 	* @param imgFile
+ 	* @param minSideLength
+ 	* @param maxNumOfPixels
+ 	* @return
+ 	*/
+	public static Bitmap tryGetBitmap(String imgFile, int minSideLength,
+		int maxNumOfPixels) {
+	if (imgFile == null || imgFile.length() == 0)
+		return null;
+
+	try {
+		FileDescriptor fd = new FileInputStream(imgFile).getFD();
+		BitmapFactory.Options options = new BitmapFactory.Options();
+		options.inJustDecodeBounds = true;
+		// BitmapFactory.decodeFile(imgFile, options);
+		BitmapFactory.decodeFileDescriptor(fd, null, options);
+
+		options.inSampleSize = computeSampleSize(options, minSideLength,
+				maxNumOfPixels);
+		try {
+			// 这里一定要将其设置回false，因为之前我们将其设置成了true
+			// 设置inJustDecodeBounds为true后，decodeFile并不分配空间，即，BitmapFactory解码出来的Bitmap为Null,但可计算出原始图片的长度和宽度
+			options.inJustDecodeBounds = false;
+
+			Bitmap bmp = BitmapFactory.decodeFile(imgFile, options);
+			return bmp == null ? null : bmp;
+		} catch (OutOfMemoryError err) {
+			return null;
+		}
+	} catch (Exception e) {
+		return null;
+	}
+	}
+
 ###Bitmap.option的使用
 ###BitmapShader的使用
 ###如何根据Bitmap.Config手写Bitmap
