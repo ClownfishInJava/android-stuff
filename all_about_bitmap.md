@@ -328,6 +328,126 @@ android的OOM是一个经常碰到的问题~~一种简便的解决方式就是�
 	}
 
 ###Bitmap.option的使用
+首先列出BitmapFactory.options选项的所有字段
+
+|	|	Field|Description	|
+|---|--------|-------------|
+|public Bitmap|inBitmap|	|
+|public int	|inDensity|	|
+|public boolean|inDither|	|
+|public boolean|inInputShareable|	|
+|public boolean|inJustDecodeBounds|	|
+|public boolean|inMutable|	|
+|public boolean|inPreferQualityOverSpeed|	|
+|public Bitmap.Config|inPreferredCOnfig|	|
+|public boolean|inPurgeable|	|
+|public int|inSampleSize|	|
+|public boolean|inScaled|	|
+|public int|inScreenDensity|	|
+|public int|inTargetDensity|	|
+|public byte[]|inTempStorage|	|
+|public boolean|mCancel|	|
+|public int|outHeight|	|
+|public String|outMimeType|	|
+|public int|outWidth|	|
+
+#####怎么获取图片大小
+首先将图片转化为Bitmap，然后再利用Bitmap的getwidth()和geiHeight()方法就可以取得图片的宽和高。
+
+但是，问题：在通过BitmapFacctory.decodeFile(String file)方法转化Bitmap时，遇到大一点的图片时，经常会碰到OOM的情况，怎么避免？
+
+此时，就要用到BitmapFactory.options这个类：
+BitmapFactory.options这个类中有一个inJustDecodeBounds这个字段；如果把它设为true，那么BitmapFactory.decodeFile（String path,Options opt）并不会真的返回一个Bitmap给你，仅仅会把它的宽高取回来，这样就不会占用太多的内存，因此也不会频繁发生OOM。
+
+	BitmapFactory.Options options = new BitmapFactory.Options();
+	options.inJustDecodeBounds = true;
+	Bitmap bmp = BitmapFactory.decodeFile(path, options);
+	/* 这里返回的bmp是null */
+
+这段代码之后，options.outWidth 和 options.outHeight就是我们想要的宽和高了。
+
+有了宽高信息，问题：怎么在图片不变形的情况下获取到图片指定大小的缩略图？
+比如，需要在图片不变形的情况下得到宽度200的缩略图。首先需要计算一下缩放之后，图片的高度是多少~~
+
+	int height = options.outHeight * 200 / options.outWidth;
+	options.outWidth = 200；
+	options.outHeight = height; 
+	/* 这样才能真正的返回一个Bitmap给你 */
+	options.inJustDecodeBounds = false;
+	Bitmap bmp = BitmapFactory.decodeFile(path, options);
+	image.setImageBitmap(bmp);
+
+虽然这样得到了期望大小的ImageView，但是在执行BitmapFactory.decodeFile(path,options)时，并没有节约内存。想要节约内存，还需要使用inSampleSize这个成员变量。
+
+	inSampleSize = options.outWidth / 200;
+
+另外，为了节约内存还可以使用以下几个字段：
+
+	options.inPreferredConfig = Bitmap.Config.ARGB_4444;    // 默认是Bitmap.Config.ARGB_8888
+	/* 下面两个字段需要组合使用 */
+	options.inPurgeable = true;
+	options.inInputShareable = true;
+
 ###BitmapShader的使用
+Android提供的Shader类主要是渲染图像以及一些几何图形
+Shader有几个直接子类：
+
+* BitmapShader:主要用来渲染图像
+* LinearGradient：用来进行线性渲染
+* RadialGradient：用来进行环形渲染
+* SweepGradient：扫面渐变---围绕一个中心点扫描渐变就像电影里那种雷达扫描，用来梯度渲染
+* ComposeShader：组合渲染，可以和其他几个子类组合起来使用
+
+####BitmapShader
+渲染器着色一个位图作为一个纹理。位图可以重复或设置模式
+
+	public   BitmapShader(Bitmap bitmap,Shader.TileMode tileX,Shader.TileMode tileY)
+	调用这个方法来产生一个画有一个位图的渲染器（Shader）。
+	bitmap   在渲染器内使用的位图
+	tileX      The tiling mode for x to draw the bitmap in.   在位图上X方向花砖模式
+	tileY     The tiling mode for y to draw the bitmap in.    在位图上Y方向花砖模式
+
+	TileMode：（一共有三种）
+	CLAMP  ：如果渲染器超出原始边界范围，会复制范围内边缘染色。
+	REPEAT ：横向和纵向的重复渲染器图片，平铺。
+	MIRROR ：横向和纵向的重复渲染器图片，这个和REPEAT重复方式不一样，他是以镜像方式平铺。
+	
+具体实现
+
+	public class BitmapShaders extends View  
+	{  
+    private  BitmapShader bitmapShader = null;  
+    private Bitmap bitmap = null;  
+    private Paint paint = null;  
+    private ShapeDrawable shapeDrawable = null;  
+    private int BitmapWidth  = 0;  
+    private int BitmapHeight = 0;  
+    public BitmapShaders(Context context)  
+    {  
+        super(context);  
+        //得到图像  
+        bitmap = ((BitmapDrawable) getResources().getDrawable(R.drawable.h)).getBitmap();    
+        BitmapWidth = bitmap.getWidth();  
+        BitmapHeight = bitmap.getHeight();  
+        //构造渲染器BitmapShader  
+        bitmapShader = new BitmapShader(bitmap,Shader.TileMode.MIRROR,Shader.TileMode.REPEAT);  
+    }  
+    @Override  
+    protected void onDraw(Canvas canvas)  
+    {  
+        super.onDraw(canvas);  
+        //将图片裁剪为椭圆形    
+        //构建ShapeDrawable对象并定义形状为椭圆    
+        shapeDrawable = new ShapeDrawable(new OvalShape());  
+        //得到画笔并设置渲染器  
+        shapeDrawable.getPaint().setShader(bitmapShader);  
+        //设置显示区域  
+        shapeDrawable.setBounds(20, 20,BitmapWidth-60,BitmapHeight-60);  
+        //绘制shapeDrawable  
+        shapeDrawable.draw(canvas);  
+    }  
+	}  
+
+
 ###如何根据Bitmap.Config手写Bitmap
 ###使用LruCache，SD卡，手机缓存
